@@ -1,0 +1,143 @@
+#!/bin/bash
+#
+# chkconfig: - 1 99
+# description: runsvdir
+# probe: false
+
+# Written by Alexander Rumyantsev
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+prefix="/usr"
+servicedir="/var/runit"
+logdir="/var/log/runit"
+
+daemon="runsvdir"
+pidfile="/var/run/$daemon.pid"
+
+command="$prefix/bin/runit-start $servicedir $logdir"
+lockf="/var/lock/subsys/$daemon"
+
+is_running() {
+    # try to find process by its pidfile
+    if [ -e $pidfile ]; then
+        pid=`cat $pidfile 2>/dev/null`
+        if ps -o comm= $pid | grep $daemon 2>&1 >/dev/null; then
+            return 0;
+        fi
+    fi
+
+    # ensure master process alive and single
+    pcount=`ps -o comm= --ppid=1 | grep -c $daemon 2>/dev/null`
+    if [ $pcount -gt 1 ]; then
+        killall -9 $daemon
+        rm -f $lockf 2>&1 >/dev/null
+        return 1
+    fi
+
+    # find the pid of master process and write it
+    pid=`ps -o pid=,comm= --ppid=1 | awk "/$daemon/ {print \\$1}" 2>/dev/null`;
+    if [ "$pid" ]; then
+        echo $pid > $pidfile
+        return 0
+    fi
+
+    return 1
+}
+
+stopmaster() {
+    countdown=30
+    pid=`cat $pidfile 2>/dev/null`
+
+    kill $pid
+
+    while [ $countdown -gt 0 ] && is_running >/dev/null; do
+        echo -n .
+        let countdown--
+        sleep 1
+    done
+
+    if is_running; then
+        kill -9 $pid
+    fi
+
+    rm -f $lockf 2>&1 >/dev/null
+    rm -f $pidfile 2>&1 >/dev/null
+}
+
+
+start() {
+    echo -n "Starting $daemon: "
+
+    if is_running; then
+        echo -n "already running"
+        failure "$daemon start: already running"
+        echo
+        exit 1
+    fi
+
+    if eval $command; then
+        success "$daemon started"
+        echo
+        touch $lockf
+        exit 0
+    else
+        failure "$daemon start: daemon died suddenly"
+        echo
+        rm -f $lockf 2>&1 >/dev/null
+        exit 1
+    fi
+}
+
+stop() {
+    echo -n "Stopping $daemon: "
+    if is_running; then
+        stopmaster
+        success "$daemon stopped"
+        echo
+        exit 0
+    else
+        echo -n "not running"
+        failure "$daemon stop: not running"
+        echo
+        exit 1
+    fi
+}
+
+
+restart() {
+    $0 stop
+    $0 start
+}
+
+# See how we were called.
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    condrestart)
+        [ -f $lockf ] && restart
+        ;;
+    status)
+        if is_running; then
+            echo "$daemon is running"
+        else
+            echo "$daemon is not running"
+        fi
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|restart|condrestart}"
+        exit 1
+esac
+
+exit $?

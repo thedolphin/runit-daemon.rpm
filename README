@@ -1,0 +1,6 @@
+This repository contains files, required to build RPM for runit
+
+Compared to original runit, this package contains additional utility, runit-start,
+which starts runsvdir with its stdout piped to svlogd as a daemon.
+Now no additional scripts is needed to start runsvdir as a part of
+standard init.

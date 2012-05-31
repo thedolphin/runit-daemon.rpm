@@ -1,0 +1,156 @@
+diff -Naur admin.orig/runit-2.1.1/package/commands admin/runit-2.1.1/package/commands
+--- admin.orig/runit-2.1.1/package/commands	2009-10-05 00:44:02.000000000 +0400
++++ admin/runit-2.1.1/package/commands	2012-05-31 11:36:10.000000000 +0400
+@@ -1,6 +1,7 @@
+ chpst
+ runit
+ runit-init
++runit-start
+ runsv
+ runsvchdir
+ runsvdir
+diff -Naur admin.orig/runit-2.1.1/src/Makefile admin/runit-2.1.1/src/Makefile
+--- admin.orig/runit-2.1.1/src/Makefile	2009-10-05 00:44:02.000000000 +0400
++++ admin/runit-2.1.1/src/Makefile	2012-05-31 11:31:52.000000000 +0400
+@@ -1,4 +1,4 @@
+-IT=chpst runit runit-init runsv runsvchdir runsvdir sv svlogd utmpset
++IT=chpst runit runit-init runit-start runsv runsvchdir runsvdir sv svlogd utmpset
+ 
+ default: sysdeps $(IT)
+ 
+@@ -466,3 +466,6 @@
+ wait_pid.o: compile error.h haswaitp.h wait_pid.c
+ 	./compile wait_pid.c
+ 
++runit-start: runit-start.c
++	./compile runit-start.c
++	./load runit-start
+diff -Naur admin.orig/runit-2.1.1/src/runit-start.c admin/runit-2.1.1/src/runit-start.c
+--- admin.orig/runit-2.1.1/src/runit-start.c	1970-01-01 03:00:00.000000000 +0300
++++ admin/runit-2.1.1/src/runit-start.c	2012-05-30 18:46:16.000000000 +0400
+@@ -0,0 +1,113 @@
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/signal.h>
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <stdlib.h>
++
++#define MAXINTLEN 10
++
++/*
++(c) Alexander Rumyantsev, Wikimart, 2012
++This code is published under the terms of General Public License
++*/
++
++int main(int argc, char ** argv) {
++
++    char *svlogd_args[] = {"svlogd", (char *)NULL, (char *)NULL};
++    char *runsvdir_args[] = {"runsvdir", "-P", (char *)NULL, (char *)NULL};
++    char *pids = malloc(MAXINTLEN + 1);
++    struct stat buf;
++
++    if (argc < 3) {
++        printf("Usage: runit-start [service dir] [log dir]\n");
++        return 1;
++    }
++
++    if (stat(argv[1], &buf) < 0) {
++        perror("stat");
++        return 1;
++    }
++
++    if (! S_ISDIR(buf.st_mode)) {
++        printf("arg 1 is not a directory\n");
++        return 1;
++    }
++
++    if (stat(argv[2], &buf) < 0) {
++        perror("stat");
++        return 1;
++    }
++
++    if (! S_ISDIR(buf.st_mode)) {
++        printf("arg 2 is not a directory\n");
++        return 1;
++    }
++
++    runsvdir_args[2] = argv[1];
++    svlogd_args[1] = argv[2];
++
++    int pipefd[2];
++    if (pipe(pipefd) == -1) {
++        perror("pipe");
++        return 1;
++    }
++
++    int devnull = open("/dev/null",O_RDWR);
++    if (devnull < 0) {
++        perror("open /dev/null");
++        return 1;
++    }
++
++    chdir("/");
++
++    signal(SIGCHLD, SIG_IGN);
++
++    pid_t svlogd = fork();
++
++    if (svlogd < 0)
++        return 1;
++
++    if (svlogd == 0) {
++    /* we are child, run logger */
++        pid_t svlogd_s = setsid();
++        close(pipefd[1]);
++        dup2(pipefd[0], STDIN_FILENO);
++        dup2(devnull, STDOUT_FILENO);
++        dup2(devnull, STDERR_FILENO);
++
++        execvp("svlogd", svlogd_args) < 0;
++        return 1;
++    }
++
++    pid_t runsvdir = fork();
++
++    if (runsvdir < 0)
++        return 1;
++
++    if (runsvdir == 0) {
++    /* we are child, run runsvdir */
++        pid_t svlogd_s = setsid();
++        close(pipefd[0]);
++        dup2(devnull, STDIN_FILENO);
++        dup2(pipefd[1], STDOUT_FILENO);
++        dup2(pipefd[1], STDERR_FILENO);
++
++        execvp("runsvdir", runsvdir_args) < 0;
++        return 1;
++    }
++
++    int pidf;
++    int pidl;
++    pidf = open("/var/run/svlogd.pid", O_WRONLY | O_CREAT | O_TRUNC);
++    pidl = snprintf(pids, MAXINTLEN, "%d", svlogd);
++    write(pidf, pids, pidl);
++    close(pidf);
++    pidf = open("/var/run/runsvdir.pid", O_WRONLY | O_CREAT | O_TRUNC);
++    pidl = snprintf(pids, MAXINTLEN, "%d", runsvdir);
++    write(pidf, pids, pidl);
++    close(pidf);
++
++    return 0;
++}
+diff -Naur admin.orig/runit-2.1.1/src/TARGETS admin/runit-2.1.1/src/TARGETS
+--- admin.orig/runit-2.1.1/src/TARGETS	2009-10-05 00:44:02.000000000 +0400
++++ admin/runit-2.1.1/src/TARGETS	2012-05-31 11:17:44.000000000 +0400
+@@ -2,6 +2,8 @@
+ runit.o
+ runit-init
+ runit-init.o
++runit-start.o
++runit-start
+ runsv
+ runsv.o
+ runsvdir
