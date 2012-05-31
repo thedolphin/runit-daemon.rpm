@@ -53,7 +53,7 @@ stopmaster() {
     countdown=30
     pid=`cat $pidfile 2>/dev/null`
 
-    kill $pid
+    kill $1 $pid
 
     while [ $countdown -gt 0 ] && is_running >/dev/null; do
         echo -n .
@@ -61,7 +61,7 @@ stopmaster() {
         sleep 1
     done
 
-    if is_running; then
+    if is_running && [ -z "$1" ]; then
         kill -9 $pid
     fi
 
@@ -96,7 +96,7 @@ start() {
 stop() {
     echo -n "Stopping $daemon: "
     if is_running; then
-        stopmaster
+        stopmaster $1
         success "$daemon stopped"
         echo
         exit 0
@@ -108,9 +108,8 @@ stop() {
     fi
 }
 
-
 restart() {
-    $0 stop
+    $0 stop $1
     $0 start
 }
 
@@ -122,8 +121,14 @@ case "$1" in
     stop)
         stop
         ;;
+    stopall)
+        stop -1
+        ;;
     restart)
         restart
+        ;;
+    restartall)
+        restart -1
         ;;
     condrestart)
         [ -f $lockf ] && restart
@@ -136,7 +141,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo $"Usage: $0 {start|stop|restart|condrestart}"
+        echo $"Usage: $0 {start|stop|stopall|restart|restartall|condrestart}"
         exit 1
 esac
 
